@@ -1,0 +1,432 @@
+Updated Code
+This version dynamically maps the file name prefix to the corresponding handler.
+
+1. FileProcessor - Dynamically Instantiate Handler
+csharp
+Copy
+Edit
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
+using System.Reflection;
+
+class FileProcessor
+{
+    private static string directoryPath = @"C:\CSVFiles"; // Update as needed
+    private static string connectionString = "your_connection_string_here"; // Update for SQL Server
+
+    public void ProcessFiles()
+    {
+        string pattern = @"^(?<prefix>[a-zA-Z]+)_\d+_\d{4}-\d{2}-\d{2}"; // Example: sales_123_2025-03-06.csv
+
+        foreach (string filePath in Directory.GetFiles(directoryPath, "*.csv"))
+        {
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+            Match match = Regex.Match(fileName, pattern);
+
+            if (match.Success)
+            {
+                string handlerName = match.Groups["prefix"].Value + "Handler"; // Example: sales -> SalesHandler
+                DataTable dt = ReadCsvToDataTable(filePath);
+
+                IFileHandler handler = GetHandler(handlerName);
+
+                if (handler != null)
+                {
+                    if (handler.ValidateDataTable(dt))
+                    {
+                        SaveToDatabase(dt);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Validation failed for {fileName}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"No handler found for {fileName}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Skipping invalid file: {fileName}");
+            }
+        }
+    }
+
+    private DataTable ReadCsvToDataTable(string filePath)
+    {
+        DataTable dt = new DataTable();
+        string[] lines = File.ReadAllLines(filePath);
+
+        if (lines.Length > 0)
+        {
+            string[] headers = lines[0].Split(',');
+            foreach (string header in headers)
+            {
+                dt.Columns.Add(header.Trim());
+            }
+
+            for (int i = 1; i < lines.Length; i++)
+            {
+                string[] rowData = lines[i].Split(',');
+                dt.Rows.Add(rowData);
+            }
+        }
+
+        return dt;
+    }
+
+    private IFileHandler GetHandler(string handlerName)
+    {
+        Type handlerType = Assembly.GetExecutingAssembly().GetTypes()
+            .FirstOrDefault(t => t.Name.Equals(handlerName, StringComparison.OrdinalIgnoreCase) && typeof(IFileHandler).IsAssignableFrom(t));
+
+        if (handlerType != null)
+        {
+            return (IFileHandler)Activator.CreateInstance(handlerType);
+        }
+
+        return null;
+    }
+
+    private void SaveToDatabase(DataTable dt)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            conn.Open();
+            foreach (DataRow row in dt.Rows)
+            {
+                using (SqlCommand cmd = new SqlCommand("INSERT INTO YourTable (Column1, Column2) VALUES (@Col1, @Col2)", conn))
+                {
+                    cmd.Parameters.AddWithValue("@Col1", row["Column1"]);
+                    cmd.Parameters.AddWithValue("@Col2", row["Column2"]);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+        Console.WriteLine("Data saved successfully.");
+    }
+}
+hatGPT
+
+Share
+
+User
+You said:
+I'm using .net 4.6 and I want to build the c# console application with following requirements. Read list of CSV files from the specified path and validate each file name follows a pattern like name_{numeric}_date. Then if file name pattern matches read the data and keep it data table. Then call the right handler using overriding based on the file name.then the handler do the validation on the data table each row and column with data type, format,length etc.then save it sql db
+ChatGPT said:
+Here's a structured approach to building your C# console application in .NET 4.6:
+
+Steps to Implement
+Read the list of CSV files from a specified directory.
+Validate the file names based on the pattern (name_{numeric}_date).
+Load valid files into a DataTable.
+Determine the correct handler based on file name and process the data.
+Validate each row and column in the DataTable.
+Save validated data into SQL Server.
+Code Implementation
+I'll provide a structured implementation with FileProcessor, Handlers, and Database Operations.
+
+1. FileProcessor - Reads & Validates CSV Files
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
+
+class FileProcessor
+{
+    private static string directoryPath = @"C:\CSVFiles"; // Change as needed
+    private static string connectionString = "your_connection_string_here"; // Update for SQL Server
+
+    public void ProcessFiles()
+    {
+        string pattern = @"name_\d+_\d{4}-\d{2}-\d{2}"; // Example: name_123_2025-03-06.csv
+
+        foreach (string filePath in Directory.GetFiles(directoryPath, "*.csv"))
+        {
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+
+            if (Regex.IsMatch(fileName, pattern))
+            {
+                DataTable dt = ReadCsvToDataTable(filePath);
+                IFileHandler handler = GetHandler(fileName);
+                
+                if (handler != null)
+                {
+                    if (handler.ValidateDataTable(dt))
+                    {
+                        SaveToDatabase(dt);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Validation failed for {fileName}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Skipping invalid file: {fileName}");
+            }
+        }
+    }
+
+    private DataTable ReadCsvToDataTable(string filePath)
+    {
+        DataTable dt = new DataTable();
+        string[] lines = File.ReadAllLines(filePath);
+
+        if (lines.Length > 0)
+        {
+            string[] headers = lines[0].Split(',');
+            foreach (string header in headers)
+            {
+                dt.Columns.Add(header.Trim());
+            }
+
+            for (int i = 1; i < lines.Length; i++)
+            {
+                string[] rowData = lines[i].Split(',');
+                dt.Rows.Add(rowData);
+            }
+        }
+
+        return dt;
+    }
+
+    private IFileHandler GetHandler(string fileName)
+    {
+        if (fileName.Contains("123")) return new TypeAHandler();
+        if (fileName.Contains("456")) return new TypeBHandler();
+        return null;
+    }
+
+    private void SaveToDatabase(DataTable dt)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            conn.Open();
+            foreach (DataRow row in dt.Rows)
+            {
+                using (SqlCommand cmd = new SqlCommand("INSERT INTO YourTable (Column1, Column2) VALUES (@Col1, @Col2)", conn))
+                {
+                    cmd.Parameters.AddWithValue("@Col1", row["Column1"]);
+                    cmd.Parameters.AddWithValue("@Col2", row["Column2"]);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+        Console.WriteLine("Data saved successfully.");
+    }
+}
+2. Handlers - Validate Data Rows
+interface IFileHandler
+{
+    bool ValidateDataTable(DataTable dt);
+}
+
+class TypeAHandler : IFileHandler
+{
+    public bool ValidateDataTable(DataTable dt)
+    {
+        foreach (DataRow row in dt.Rows)
+        {
+            if (!int.TryParse(row["ID"].ToString(), out _)) return false;
+            if (row["Name"].ToString().Length > 50) return false;
+        }
+        return true;
+    }
+}
+
+class TypeBHandler : IFileHandler
+{
+    public bool ValidateDataTable(DataTable dt)
+    {
+        foreach (DataRow row in dt.Rows)
+        {
+            if (!DateTime.TryParse(row["Date"].ToString(), out _)) return false;
+            if (row["Description"].ToString().Length > 100) return false;
+        }
+        return true;
+    }
+}
+How it Works
+FileProcessor reads files from C:\CSVFiles.
+Validates the file name using Regex.
+Reads the CSV data into a DataTable.
+Calls the appropriate handler based on file name.
+The handler validates each row & column.
+If validation passes, it saves data into SQL Server.
+Would you like any modifications, such as better logging or exception handling? 🚀
+
+You said:
+CSV file name first part and name of c handler are same. Call the handler dynamically by file name 
+ChatGPT said:
+To dynamically instantiate the handler based on the file name, we can follow these steps:
+
+Approach
+Extract the first part of the file name (before the first underscore _).
+Use Reflection to dynamically instantiate the corresponding handler class.
+Ensure that each handler class follows the IFileHandler interface.
+If a matching handler exists, instantiate it and process the data.
+Updated Code
+This version dynamically maps the file name prefix to the corresponding handler.
+
+1. FileProcessor - Dynamically Instantiate Handler
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
+using System.Reflection;
+
+class FileProcessor
+{
+    private static string directoryPath = @"C:\CSVFiles"; // Update as needed
+    private static string connectionString = "your_connection_string_here"; // Update for SQL Server
+
+    public void ProcessFiles()
+    {
+        string pattern = @"^(?<prefix>[a-zA-Z]+)_\d+_\d{4}-\d{2}-\d{2}"; // Example: sales_123_2025-03-06.csv
+
+        foreach (string filePath in Directory.GetFiles(directoryPath, "*.csv"))
+        {
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+            Match match = Regex.Match(fileName, pattern);
+
+            if (match.Success)
+            {
+                string handlerName = match.Groups["prefix"].Value + "Handler"; // Example: sales -> SalesHandler
+                DataTable dt = ReadCsvToDataTable(filePath);
+
+                IFileHandler handler = GetHandler(handlerName);
+
+                if (handler != null)
+                {
+                    if (handler.ValidateDataTable(dt))
+                    {
+                        SaveToDatabase(dt);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Validation failed for {fileName}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"No handler found for {fileName}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Skipping invalid file: {fileName}");
+            }
+        }
+    }
+
+    private DataTable ReadCsvToDataTable(string filePath)
+    {
+        DataTable dt = new DataTable();
+        string[] lines = File.ReadAllLines(filePath);
+
+        if (lines.Length > 0)
+        {
+            string[] headers = lines[0].Split(',');
+            foreach (string header in headers)
+            {
+                dt.Columns.Add(header.Trim());
+            }
+
+            for (int i = 1; i < lines.Length; i++)
+            {
+                string[] rowData = lines[i].Split(',');
+                dt.Rows.Add(rowData);
+            }
+        }
+
+        return dt;
+    }
+
+    private IFileHandler GetHandler(string handlerName)
+    {
+        Type handlerType = Assembly.GetExecutingAssembly().GetTypes()
+            .FirstOrDefault(t => t.Name.Equals(handlerName, StringComparison.OrdinalIgnoreCase) && typeof(IFileHandler).IsAssignableFrom(t));
+
+        if (handlerType != null)
+        {
+            return (IFileHandler)Activator.CreateInstance(handlerType);
+        }
+
+        return null;
+    }
+
+    private void SaveToDatabase(DataTable dt)
+    {
+        using (SqlConnection conn = new SqlConnection(connectionString))
+        {
+            conn.Open();
+            foreach (DataRow row in dt.Rows)
+            {
+                using (SqlCommand cmd = new SqlCommand("INSERT INTO YourTable (Column1, Column2) VALUES (@Col1, @Col2)", conn))
+                {
+                    cmd.Parameters.AddWithValue("@Col1", row["Column1"]);
+                    cmd.Parameters.AddWithValue("@Col2", row["Column2"]);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+        Console.WriteLine("Data saved successfully.");
+    }
+}
+2. Handler Interface
+interface IFileHandler
+{
+    bool ValidateDataTable(DataTable dt);
+}
+3. Example Handlers (Dynamically Instantiated)
+class SalesHandler : IFileHandler
+{
+    public bool ValidateDataTable(DataTable dt)
+    {
+        foreach (DataRow row in dt.Rows)
+        {
+            if (!int.TryParse(row["ID"].ToString(), out _)) return false;
+            if (row["Name"].ToString().Length > 50) return false;
+        }
+        return true;
+    }
+}
+
+class PurchaseHandler : IFileHandler
+{
+    public bool ValidateDataTable(DataTable dt)
+    {
+        foreach (DataRow row in dt.Rows)
+        {
+            if (!DateTime.TryParse(row["Date"].ToString(), out _)) return false;
+            if (row["Description"].ToString().Length > 100) return false;
+        }
+        return true;
+    }
+}
+How It Works
+Extracts file prefix from the name (e.g., "sales_123_2025-03-06.csv" → "sales").
+Appends "Handler" to the prefix → SalesHandler.
+Uses Reflection to find and instantiate the correct handler dynamically.
+Validates and saves data if a matching handler is found.
+Now, you can simply add more handlers (OrdersHandler, InvoicesHandler, etc.), and the system will automatically detect and use them.
+
+Example File-Handler Mapping
+CSV File Name	Extracted Prefix	Instantiated Handler
+sales_123_2025-03-06.csv	sales	SalesHandler
+purchase_456_2025-03-06.csv	purchase	PurchaseHandler
+This approach ensures scalability and avoids hardcoded if-else conditions
