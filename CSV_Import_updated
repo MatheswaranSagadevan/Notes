@@ -1,0 +1,230 @@
+To efficiently manage the expected column details (e.g., expected columns, column count, data types, etc.) for each DataTable, we can adopt a centralized configuration-driven approach. This ensures flexibility and avoids hardcoding these values inside each handler.
+
+Recommended Solution: Configuration-Driven Validator Setup
+Instead of defining expected column details directly in each handler, we can use:
+
+✅ Configuration File (JSON, XML, or YAML) for centralized definitions.
+✅ A ValidationConfig Class to load and access the configurations dynamically.
+✅ Each handler retrieves the relevant configuration based on the file type or identifier.
+
+Step 1: Configuration File (e.g., ValidationConfig.json)
+json
+Copy
+Edit
+{
+  "Sales": {
+    "ExpectedColumns": ["ID", "Name", "Amount"],
+    "ColumnCount": 3,
+    "DataTypes": {
+      "ID": "int",
+      "Name": "string",
+      "Amount": "decimal"
+    }
+  },
+  "Purchase": {
+    "ExpectedColumns": ["OrderID", "Supplier", "OrderDate"],
+    "ColumnCount": 3,
+    "DataTypes": {
+      "OrderID": "int",
+      "Supplier": "string",
+      "OrderDate": "datetime"
+    }
+  }
+}
+Step 2: Configuration Loader Class
+This class will read the JSON configuration and provide the necessary data for validation.
+
+csharp
+Copy
+Edit
+using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+class ValidationConfig
+{
+    public Dictionary<string, TableConfig> Tables { get; set; }
+
+    public static ValidationConfig LoadConfig(string configPath)
+    {
+        var json = File.ReadAllText(configPath);
+        return JsonConvert.DeserializeObject<ValidationConfig>(json);
+    }
+}
+
+class TableConfig
+{
+    public string[] ExpectedColumns { get; set; }
+    public int ColumnCount { get; set; }
+    public Dictionary<string, string> DataTypes { get; set; }
+}
+Step 3: Enhanced ValidatorPipeline Using Configuration
+We'll modify the ValidatorPipeline to pull the expected values from the loaded configuration.
+
+csharp
+Copy
+Edit
+class ValidatorPipeline
+{
+    private readonly List<IValidator> _validators = new List<IValidator>();
+
+    public void AddValidator(IValidator validator) => _validators.Add(validator);
+
+    public bool Validate(DataTable dt, out string errorMessage)
+    {
+        foreach (var validator in _validators)
+        {
+            if (!validator.Validate(dt, out errorMessage))
+            {
+                return false;
+            }
+        }
+
+        errorMessage = null;
+        return true;
+    }
+
+    public static ValidatorPipeline BuildFromConfig(TableConfig config)
+    {
+        var pipeline = new ValidatorPipeline();
+
+        pipeline.AddValidator(new ColumnNameValidator(config.ExpectedColumns));
+        pipeline.AddValidator(new ColumnCountValidator(config.ColumnCount));
+        pipeline.AddValidator(new DataTypeValidator(MapDataTypes(config.DataTypes)));
+
+        return pipeline;
+    }
+
+    private static Dictionary<string, Type> MapDataTypes(Dictionary<string, string> configTypes)
+    {
+        var typeMapping = new Dictionary<string, Type>
+        {
+            { "int", typeof(int) },
+            { "string", typeof(string) },
+            { "decimal", typeof(decimal) },
+            { "datetime", typeof(DateTime) }
+        };
+
+        return configTypes.ToDictionary(
+            keyValue => keyValue.Key,
+            keyValue => typeMapping[keyValue.Value.ToLower()]
+        );
+    }
+}
+Step 4: Updated Handlers to Use Configuration-Driven Validation
+Now handlers only need to specify their DataTable key (e.g., "Sales" or "Purchase").
+
+csharp
+Copy
+Edit
+class SalesHandler : IFileHandler
+{
+    private readonly TableConfig _config;
+
+    public SalesHandler(TableConfig config)
+    {
+        _config = config;
+    }
+
+    public bool ValidateDataTable(DataTable dt)
+    {
+        var validatorPipeline = ValidatorPipeline.BuildFromConfig(_config);
+
+        if (!validatorPipeline.Validate(dt, out string errorMessage))
+        {
+            Console.WriteLine($"SalesHandler Validation Failed: {errorMessage}");
+            return false;
+        }
+
+        return true;
+    }
+}
+
+class PurchaseHandler : IFileHandler
+{
+    private readonly TableConfig _config;
+
+    public PurchaseHandler(TableConfig config)
+    {
+        _config = config;
+    }
+
+    public bool ValidateDataTable(DataTable dt)
+    {
+        var validatorPipeline = ValidatorPipeline.BuildFromConfig(_config);
+
+        if (!validatorPipeline.Validate(dt, out string errorMessage))
+        {
+            Console.WriteLine($"PurchaseHandler Validation Failed: {errorMessage}");
+            return false;
+        }
+
+        return true;
+    }
+}
+Step 5: Updated FileProcessor to Inject Configurations
+The FileProcessor will now load configurations dynamically and assign them to the correct handler.
+
+csharp
+Copy
+Edit
+class FileProcessor
+{
+    private static string configPath = @"C:\Config\ValidationConfig.json";
+
+    public void ProcessFiles()
+    {
+        var config = ValidationConfig.LoadConfig(configPath);
+
+        foreach (string filePath in Directory.GetFiles(@"C:\CSVFiles", "*.csv"))
+        {
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+            string tableKey = fileName.Split('_')[0]; // Extracts "Sales", "Purchase", etc.
+
+            if (config.Tables.ContainsKey(tableKey))
+            {
+                TableConfig tableConfig = config.Tables[tableKey];
+                IFileHandler handler = CreateHandler(tableKey, tableConfig);
+
+                DataTable dt = ReadCsvToDataTable(filePath);
+
+                if (!handler.ValidateDataTable(dt))
+                {
+                    Console.WriteLine($"Validation failed for {fileName}");
+                }
+                else
+                {
+                    Console.WriteLine($"Successfully validated {fileName}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"No configuration found for {fileName}");
+            }
+        }
+    }
+
+    private IFileHandler CreateHandler(string tableKey, TableConfig tableConfig)
+    {
+        return tableKey switch
+        {
+            "Sales" => new SalesHandler(tableConfig),
+            "Purchase" => new PurchaseHandler(tableConfig),
+            _ => null
+        };
+    }
+}
+Step 6: Execution Flow
+✅ Configurations are stored in ValidationConfig.json.
+✅ Each handler loads its expected column details dynamically.
+✅ The ValidatorPipeline applies the required checks efficiently.
+✅ Adding a new handler or modifying validation logic only requires updates to the configuration file.
+
+Key Benefits
+✅ Centralized control for expected column details.
+✅ Easy to modify or expand rules without changing core logic.
+✅ Highly scalable — adding new data structures requires minimal code changes.
+✅ Ensures consistent and reusable validation logic across multiple handlers.
+
+Would you like an enhanced version with improved logging or exception handling? 🚀
